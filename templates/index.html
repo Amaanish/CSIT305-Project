@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ShuttleIQ — Smart Bus Management</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+
+<!-- ── HEADER ─────────────────────────────────────────────────────────── -->
+<header class="site-header">
+  <div class="header-inner">
+    <div class="logo">
+      <span class="logo-icon">⬡</span>
+      <span class="logo-text">ShuttleIQ</span>
+    </div>
+    <nav class="header-nav">
+      <span class="nav-label">AI-Powered Shuttle Management</span>
+      <div class="live-badge">
+        <span class="pulse-dot"></span> Live
+      </div>
+    </nav>
+  </div>
+</header>
+
+<!-- ── HERO STRIP ─────────────────────────────────────────────────────── -->
+<section class="hero-strip">
+  <div class="hero-inner">
+    <div class="hero-stat">
+      <span class="stat-number" id="hero-routes">4</span>
+      <span class="stat-label">Routes</span>
+    </div>
+    <div class="hero-divider"></div>
+    <div class="hero-stat">
+      <span class="stat-number" id="hero-capacity">40</span>
+      <span class="stat-label">Seats / Bus</span>
+    </div>
+    <div class="hero-divider"></div>
+    <div class="hero-stat">
+      <span class="stat-number" id="hero-model-occ">—</span>
+      <span class="stat-label">RF Occ MAE (pax)</span>
+    </div>
+    <div class="hero-divider"></div>
+    <div class="hero-stat">
+      <span class="stat-number" id="hero-model-tt">—</span>
+      <span class="stat-label">RF ETA MAE (min)</span>
+    </div>
+  </div>
+</section>
+
+<!-- ── MAIN LAYOUT ────────────────────────────────────────────────────── -->
+<main class="main-grid">
+
+  <!-- LEFT: Prediction Panel -->
+  <section class="panel panel-predict">
+    <div class="panel-header">
+      <h2>Predict Now</h2>
+      <p class="panel-sub">Select a route and time to get an AI prediction</p>
+    </div>
+
+    <div class="form-group">
+      <label for="sel-route">Route</label>
+      <select id="sel-route">
+        {% for r in routes %}
+        <option value="{{ r }}">{{ r }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label for="sel-hour">Hour</label>
+        <select id="sel-hour">
+          {% for h in range(6, 23) %}
+          <option value="{{ h }}" {% if h == 8 %}selected{% endif %}>{{ '%02d:00' % h }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="sel-day">Day</label>
+        <select id="sel-day">
+          <option value="0">Monday</option>
+          <option value="1">Tuesday</option>
+          <option value="2">Wednesday</option>
+          <option value="3">Thursday</option>
+          <option value="4">Friday</option>
+          <option value="5">Saturday</option>
+          <option value="6">Sunday</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="toggle-row">
+      <label class="toggle-label">
+        <input type="checkbox" id="toggle-gps" checked />
+        <span class="toggle-switch"></span>
+        GPS Active
+      </label>
+    </div>
+
+    <button class="btn-predict" id="btn-predict">Get Prediction</button>
+
+    <!-- Result card -->
+    <div class="result-card hidden" id="result-card">
+      <div class="result-header">
+        <span class="result-route" id="res-route"></span>
+        <span class="crowd-badge" id="res-crowd"></span>
+      </div>
+
+      <div class="gps-warning hidden" id="gps-warning">
+        ⚠ GPS signal lost — ETA may be unreliable
+      </div>
+
+      <div class="peak-banner hidden" id="peak-banner">
+        🔴 Peak hour — high demand expected
+      </div>
+
+      <div class="extra-banner hidden" id="extra-banner">
+        🚌 Additional shuttle recommended
+      </div>
+
+      <div class="result-metrics">
+        <div class="metric-box">
+          <span class="metric-value" id="res-occupancy">—</span>
+          <span class="metric-label">Passengers</span>
+        </div>
+        <div class="metric-box">
+          <span class="metric-value" id="res-seats">—</span>
+          <span class="metric-label">Seats Free</span>
+        </div>
+        <div class="metric-box">
+          <span class="metric-value" id="res-eta">—</span>
+          <span class="metric-label">ETA (min)</span>
+        </div>
+      </div>
+
+      <!-- Occupancy bar -->
+      <div class="occ-bar-wrap">
+        <div class="occ-bar-track">
+          <div class="occ-bar-fill" id="occ-bar"></div>
+        </div>
+        <span class="occ-bar-pct" id="occ-pct">0%</span>
+      </div>
+
+      <!-- Route stops -->
+      <div class="stops-row" id="stops-row"></div>
+
+      <!-- Model vs Baseline comparison -->
+      <div class="comparison-row">
+        <div class="cmp-item">
+          <span class="cmp-label">RF Model</span>
+          <span class="cmp-val" id="cmp-rf-occ">—</span>
+          <span class="cmp-sub">pax predicted</span>
+        </div>
+        <div class="cmp-item">
+          <span class="cmp-label">Baseline</span>
+          <span class="cmp-val" id="cmp-base-occ">—</span>
+          <span class="cmp-sub">historical avg</span>
+        </div>
+        <div class="cmp-item">
+          <span class="cmp-label">ETA Baseline</span>
+          <span class="cmp-val" id="cmp-base-tt">—</span>
+          <span class="cmp-sub">min (hist. avg)</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT: Dashboard -->
+  <section class="panel panel-dashboard">
+    <div class="panel-header">
+      <h2>Fleet Overview</h2>
+      <p class="panel-sub">All routes — current snapshot</p>
+    </div>
+
+    <div class="fleet-grid" id="fleet-grid">
+      <div class="loading-msg">Loading fleet data…</div>
+    </div>
+
+    <div class="panel-header" style="margin-top: 2rem;">
+      <h2>Demand Forecast</h2>
+      <p class="panel-sub">Hourly occupancy prediction for selected route</p>
+    </div>
+
+    <div class="chart-wrap">
+      <canvas id="demand-chart"></canvas>
+    </div>
+
+    <!-- Model metrics -->
+    <div class="metrics-section">
+      <h3>Model Performance</h3>
+      <div class="metrics-grid" id="metrics-grid">
+        <div class="loading-msg">Loading metrics…</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ── FOOTER ─────────────────────────────────────────────────────────── -->
+<footer class="site-footer">
+  <p>ShuttleIQ POC — CSIT305 Project · Random Forest + Baseline comparison · Synthetic dataset</p>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
