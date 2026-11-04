@@ -1,17 +1,23 @@
 """
 app.py  —  Smart Shuttle Bus Management System
-Flask backend serving predictions and dashboard data.
+Flask backend serving predictions, dashboard data and the employee dispatch portal.
 """
 
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, session, redirect, url_for
+from functools import wraps
 import joblib
 import json
+import math
+import uuid
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 import os
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "dev-change-me")
+EMPLOYEE_PIN   = os.environ.get("EMPLOYEE_PIN", "1234")   # set a real one on Render
+DISPATCHES     = []   # in-memory log (resets on restart; use ONE gunicorn worker)
 
 # ── Load models & metadata ────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(__file__)
@@ -110,7 +116,7 @@ def get_prediction(hour, day_of_week, is_weekend, route_name):
     }
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# ── Customer routes ───────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
@@ -214,6 +220,124 @@ def simulate_gps_failure():
     pred["gps_warning"] = "GPS signal lost — arrival time estimate may be unreliable. Showing last-known prediction."
     pred["route"]       = route
     return jsonify(pred)
+
+
+# ── Employee portal ───────────────────────────────────────────────────────────
+
+def employee_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("employee"):
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Unauthorized"}), 401
+            return redirect(url_for("employee_login"))
+        return f(*args, **kwargs)
+    return wrapper
+
+
+@app.route("/employee/login", methods=["GET", "POST"])
+def employee_login():
+    error = None
+    if request.method == "POST":
+        if request.form.get("pin", "") == EMPLOYEE_PIN:
+            session["employee"] = True
+            return redirect(url_for("employee_dashboard"))
+        error = "Incorrect PIN. Try again."
+    return render_template("employee_login.html", error=error)
+
+
+@app.route("/employee/logout")
+def employee_logout():
+    session.pop("employee", None)
+    return redirect(url_for("index"))
+
+
+@app.route("/employee")
+@employee_required
+def employee_dashboard():
+    return render_template("employee.html", routes=ROUTES, route_stops=ROUTE_STOPS)
+
+
+@app.route("/api/employee/overview")
+@employee_required
+def employee_overview():
+    """Heatmap of predicted load (all routes x hours) + dispatch recommendations."""
+    if not MODELS_LOADED:
+        return jsonify({"error": "Models not loaded"}), 503
+    now = datetime.now()
+    day, wk = now.weekday(), int(now.weekday() >= 5)
+    cur = min(22, max(6, now.hour))
+
+    heat = {r: [get_prediction(h, day, wk, r)["occupancy_pct"] for h in range(6, 23)] for r in ROUTES}
+
+    active = [d for d in DISPATCHES if d["status"] != "Cancelled"]
+    recs = []
+    for r in ROUTES:
+        for h in range(cur, min(23, cur + 4)):      # now + next 3 hours
+            p = get_prediction(h, day, wk, r)
+            if p["occupancy_pct"] >= 80:
+                covered = sum(d["buses"] for d in active if d["route"] == r)
+                recs.append({
+                    "route": r, "hour": h, "occupancy_pct": p["occupancy_pct"],
+                    "suggested_buses": 2 if p["occupancy_pct"] >= 95 else 1,
+                    "is_peak": p["is_peak"], "already_covered": covered > 0,
+                })
+    recs.sort(key=lambda x: (-x["occupancy_pct"], x["hour"]))
+    return jsonify({
+        "now_hour": cur, "hours": list(range(6, 23)), "heatmap": heat,
+        "recommendations": recs[:8],
+        "stats": {
+            "active_dispatches": len(active),
+            "buses_out": sum(d["buses"] for d in active),
+            "alerts": len(recs),
+        },
+    })
+
+
+@app.route("/api/employee/dispatches", methods=["GET", "POST"])
+@employee_required
+def employee_dispatches():
+    if request.method == "GET":
+        return jsonify(sorted(DISPATCHES, key=lambda d: d["created_at"], reverse=True))
+
+    d = request.get_json(silent=True) or {}
+    route, dest = d.get("route"), d.get("destination")
+    if route not in ROUTES or dest not in ROUTE_STOPS[route]:
+        return jsonify({"error": "Choose a valid route and stop."}), 400
+    try:
+        buses = int(d.get("buses", 1))
+    except (TypeError, ValueError):
+        buses = 0
+    if not 1 <= buses <= 5:
+        return jsonify({"error": "Buses must be between 1 and 5."}), 400
+
+    when = d.get("when", "now")
+    if when != "now":
+        try:
+            datetime.strptime(when, "%H:%M")
+        except ValueError:
+            return jsonify({"error": "Invalid departure time."}), 400
+
+    rec = {
+        "id": uuid.uuid4().hex[:8], "route": route, "destination": dest,
+        "buses": buses, "when": when,
+        "reason": str(d.get("reason", "High demand"))[:60],
+        "note": str(d.get("note", ""))[:200],
+        "status": "Dispatched" if when == "now" else "Scheduled",
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    DISPATCHES.append(rec)
+    return jsonify(rec), 201
+
+
+@app.route("/api/employee/dispatches/<did>", methods=["DELETE"])
+@employee_required
+def cancel_dispatch(did):
+    for d in DISPATCHES:
+        if d["id"] == did:
+            d["status"] = "Cancelled"
+            return jsonify(d)
+    return jsonify({"error": "Not found"}), 404
 
 
 if __name__ == "__main__":
