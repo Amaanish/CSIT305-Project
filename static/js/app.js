@@ -1,281 +1,195 @@
-/* app.js — ShuttleIQ frontend */
+/* app.js — ShuttleIQ transit UI */
 
 const $ = id => document.getElementById(id);
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+const ROUTES = ["Campus → Mall", "Mall → Campus", "Campus → Metro", "Metro → Campus"];
+const BUS_CAPACITY = 40;
 
-function crowdColor(cls) {
-  return { success: '#2ddb6a', moderate: '#60a5fa', warning: '#f0b429', danger: '#f05252' }[cls] || '#00c8ff';
-}
+// Optare Solo layout: 4 seats per row (2+2), ~10 rows, driver at front
+// Total ~38 seats + some standing room
+const SEAT_ROWS = 10; // 10 rows of 4 seats = 40 seats
 
-function pctColor(pct) {
-  if (pct >= 90) return '#f05252';
-  if (pct >= 70) return '#f0b429';
-  if (pct >= 40) return '#60a5fa';
-  return '#2ddb6a';
-}
+let activeRoute = ROUTES[0];
+let currentHour = Math.min(22, Math.max(6, new Date().getHours()));
+let currentDay  = (() => { const m=[6,0,1,2,3,4,5]; return m[new Date().getDay()]; })();
 
-// ── On load ───────────────────────────────────────────────────────────────────
-
+// ── Init ─────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  loadMetrics();
-  loadFleet();
-  loadChart();
+  $('sel-hour').value = currentHour;
+  $('sel-day').value  = currentDay;
 
-  // Pre-select current day
-  const day = new Date().getDay();
-  const dayMap = { 0: 6, 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5 };
-  $('sel-day').value = dayMap[day] ?? 0;
-
-  // Pre-select current hour (clamped to 6–22)
-  const h = Math.min(22, Math.max(6, new Date().getHours()));
-  $('sel-hour').value = h;
-
-  $('btn-predict').addEventListener('click', runPrediction);
-  $('sel-route').addEventListener('change', loadChart);
-
-  // Refresh fleet every 30 s
-  setInterval(loadFleet, 30_000);
-});
-
-// ── Prediction ────────────────────────────────────────────────────────────────
-
-async function runPrediction() {
-  const route  = $('sel-route').value;
-  const hour   = $('sel-hour').value;
-  const day    = $('sel-day').value;
-  const gpsOk  = $('toggle-gps').checked ? '1' : '0';
-  const btn    = $('btn-predict');
-
-  btn.textContent = 'Loading…';
-  btn.disabled = true;
-
-  try {
-    const params = new URLSearchParams({ route, hour, day, gps_ok: gpsOk });
-    const res  = await fetch(`/api/predict?${params}`);
-    const data = await res.json();
-
-    if (data.error) { alert(data.error); return; }
-
-    renderResult(data);
-  } catch (e) {
-    alert('Failed to fetch prediction. Is the server running?');
-  } finally {
-    btn.textContent = 'Get Prediction';
-    btn.disabled = false;
-  }
-}
-
-function renderResult(d) {
-  const card = $('result-card');
-  card.classList.remove('hidden');
-
-  $('res-route').textContent   = d.route;
-  $('res-occupancy').textContent = d.occupancy;
-  $('res-seats').textContent   = d.available_seats;
-  $('res-eta').textContent     = d.travel_time_min;
-
-  const badge = $('res-crowd');
-  badge.textContent  = d.crowd_label;
-  badge.className    = `crowd-badge ${d.crowd_class}`;
-
-  // Banners
-  toggle('gps-warning', !d.gps_ok);
-  toggle('peak-banner',  d.is_peak);
-  toggle('extra-banner', d.recommend_extra);
-
-  // Occupancy bar
-  const fill = $('occ-bar');
-  fill.style.width      = `${d.occupancy_pct}%`;
-  fill.style.background = pctColor(d.occupancy_pct);
-  $('occ-pct').textContent = `${d.occupancy_pct}%`;
-
-  // Stops
-  const stopsRow = $('stops-row');
-  stopsRow.innerHTML = '';
-  (d.stops || []).forEach((stop, i) => {
-    const dot = el('span', 'stop-dot');
-    const lbl = el('span', 'stop-label');
-    lbl.textContent = stop;
-    stopsRow.appendChild(dot);
-    stopsRow.appendChild(lbl);
-    if (i < d.stops.length - 1) stopsRow.appendChild(el('span', 'stop-line'));
+  // Route tabs
+  document.querySelectorAll('.route-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.route-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeRoute = btn.dataset.route;
+      refresh();
+    });
   });
 
-  // Comparison
-  $('cmp-rf-occ').textContent   = d.occupancy;
-  $('cmp-base-occ').textContent = d.baseline_occ;
-  $('cmp-base-tt').textContent  = d.baseline_tt;
+  $('btn-go').addEventListener('click', () => {
+    currentHour = parseInt($('sel-hour').value);
+    currentDay  = parseInt($('sel-day').value);
+    refresh();
+  });
+
+  loadMetrics();
+  refresh();
+});
+
+function refresh() {
+  loadDepartures();
 }
 
-// ── Fleet overview ────────────────────────────────────────────────────────────
+// ── Departures ────────────────────────────────────────────────────────────────
+// Simulate 3 upcoming buses: now, +15min, +30min
+async function loadDepartures() {
+  const container = $('departures');
+  container.innerHTML = '<div class="loading">Fetching…</div>';
 
-async function loadFleet() {
-  try {
-    const res  = await fetch('/api/all_routes');
-    const data = await res.json();
+  // Fetch predictions for current hour and next (simulating ±15min slots)
+  const offsets = [0, 15, 30]; // minutes from now
+  const results = await Promise.all(offsets.map(async (offset) => {
+    const h = Math.min(22, currentHour + (offset >= 60 ? 1 : 0));
+    const params = new URLSearchParams({ route: activeRoute, hour: h, day: currentDay });
+    const res = await fetch(`/api/predict?${params}`);
+    return { offset, data: await res.json() };
+  }));
+
+  container.innerHTML = '';
+
+  // Find the best (least crowded) bus
+  const bestIdx = results.reduce((bi, r, i) =>
+    r.data.occupancy < results[bi].data.occupancy ? i : bi, 0);
+
+  results.forEach(({ offset, data }, i) => {
     if (data.error) return;
 
-    const grid = $('fleet-grid');
-    grid.innerHTML = '';
+    const depTime = new Date();
+    depTime.setHours(currentHour, offset, 0, 0);
+    const timeStr = depTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-    data.routes.forEach(r => {
-      const card = el('div', 'fleet-card');
+    const isBest = i === bestIdx;
+    const isFull = data.occupancy_pct >= 95;
+    const seatChance = isFull ? 0 : Math.round(100 - data.occupancy_pct);
 
-      const routeName = el('span', 'fleet-route');
-      routeName.textContent = r.route;
+    const row = document.createElement('div');
+    row.className = `dep-row${isBest ? ' best' : ''}`;
 
-      const barTrack = el('div', 'fleet-bar-track');
-      const barFill  = el('div', 'fleet-bar-fill');
-      barFill.style.width      = `${r.occupancy_pct}%`;
-      barFill.style.background = pctColor(r.occupancy_pct);
-      barTrack.appendChild(barFill);
+    let chanceClass = seatChance >= 60 ? 'high' : seatChance >= 30 ? 'medium' : 'low';
+    let chanceText  = isFull
+      ? '🚫 Full'
+      : `${seatChance}% chance of a seat`;
 
-      const meta = el('div', 'fleet-meta');
-      meta.innerHTML = `<span>${r.occupancy}/${40} pax</span><span>${r.travel_time_min} min ETA</span>`;
+    let badgeHtml = '';
+    if (isBest && !isFull) badgeHtml = `<span class="dep-badge best-tag">Best option</span>`;
+    else if (isFull)       badgeHtml = `<span class="dep-badge full-tag">Full</span>`;
+    else if (data.occupancy_pct >= 70) badgeHtml = `<span class="dep-badge busy-tag">Busy</span>`;
 
-      const badge = el('span', `fleet-badge crowd-badge ${r.crowd_class}`);
-      badge.textContent = r.crowd_label;
+    row.innerHTML = `
+      <div class="dep-left">
+        <span class="dep-time">${timeStr}</span>
+        <span class="dep-eta">~${data.travel_time_min} min journey</span>
+      </div>
+      <div class="dep-right">
+        <span class="dep-chance ${chanceClass}">${chanceText}</span>
+        ${badgeHtml}
+      </div>`;
 
-      card.append(routeName, badge, barTrack, meta);
-      if (r.recommend_extra) {
-        const warn = el('div', '');
-        warn.innerHTML = `<span style="font-size:0.7rem;color:var(--accent-2)">🚌 Extra bus recommended</span>`;
-        card.appendChild(warn);
+    row.addEventListener('click', () => renderSeatMap(data, activeRoute));
+    container.appendChild(row);
+  });
+
+  // Auto-render seat map for best bus
+  renderSeatMap(results[bestIdx].data, activeRoute);
+  renderRecommendation(results, bestIdx);
+}
+
+// ── Seat map ──────────────────────────────────────────────────────────────────
+function renderSeatMap(data, route) {
+  const busBody = $('bus-body');
+  $('seatmap-route').textContent = route;
+
+  const occupancy = data.occupancy;
+  const standing  = Math.max(0, occupancy - BUS_CAPACITY);
+  const seated    = Math.min(occupancy, BUS_CAPACITY);
+
+  busBody.innerHTML = '';
+
+  // Driver row
+  const driverArea = document.createElement('div');
+  driverArea.className = 'driver-area';
+  driverArea.innerHTML = `<span class="driver-wheel">🚌</span><span>Driver · Door</span>`;
+  busBody.appendChild(driverArea);
+
+  // Seat grid: 10 rows × 4 seats (2 left + aisle + 2 right) = 40 seats
+  const grid = document.createElement('div');
+  grid.className = 'seat-grid';
+
+  for (let row = 0; row < SEAT_ROWS; row++) {
+    for (let col = 0; col < 5; col++) {
+      if (col === 2) {
+        // aisle
+        const aisle = document.createElement('div');
+        aisle.className = 'aisle';
+        grid.appendChild(aisle);
+        continue;
       }
-      grid.appendChild(card);
-    });
-  } catch (e) {
-    console.warn('Fleet load failed:', e);
+      const seatIndex = row * 4 + (col > 2 ? col - 1 : col);
+      const seat = document.createElement('div');
+      seat.className = 'seat ' + (seatIndex < seated ? 'taken' : 'free');
+      grid.appendChild(seat);
+    }
+  }
+
+  busBody.appendChild(grid);
+
+  // Standing indicator
+  if (standing > 0) {
+    const standDiv = document.createElement('div');
+    standDiv.style.cssText = 'margin-top:0.6rem;font-size:0.72rem;color:var(--yellow);text-align:center;';
+    standDiv.textContent = `+${standing} standing passengers`;
+    busBody.appendChild(standDiv);
+  }
+
+  // Occupancy summary
+  const summary = document.createElement('div');
+  summary.style.cssText = 'margin-top:0.5rem;font-size:0.75rem;color:var(--dim);text-align:center;';
+  summary.textContent = `${seated} seated · ${BUS_CAPACITY - seated} seats free · ${data.occupancy_pct}% full`;
+  busBody.appendChild(summary);
+}
+
+// ── Recommendation ────────────────────────────────────────────────────────────
+function renderRecommendation(results, bestIdx) {
+  const best = results[bestIdx].data;
+  const offset = results[bestIdx].offset;
+
+  const depTime = new Date();
+  depTime.setHours(currentHour, offset, 0, 0);
+  const timeStr = depTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  const freeSeats = BUS_CAPACITY - best.occupancy;
+  const isFull = best.occupancy_pct >= 95;
+
+  if (isFull) {
+    $('rec-card').querySelector('.rec-icon').textContent = '⚠️';
+    $('rec-title').textContent = 'All upcoming buses are busy';
+    $('rec-sub').textContent   = 'Consider travelling outside peak hours';
+  } else {
+    $('rec-card').querySelector('.rec-icon').textContent = '✅';
+    $('rec-title').textContent = `Take the ${timeStr} bus`;
+    $('rec-sub').textContent   = `~${freeSeats} seats available · ${best.travel_time_min} min journey · ${best.crowd_label}`;
   }
 }
 
-// ── Demand chart ──────────────────────────────────────────────────────────────
-
-let chartInstance = null;
-
-async function loadChart() {
-  const route = $('sel-route').value;
-  const day   = $('sel-day').value;
-
-  try {
-    const res  = await fetch(`/api/schedule?route=${encodeURIComponent(route)}&day=${day}`);
-    const data = await res.json();
-    if (data.error) return;
-
-    const labels  = data.forecast.map(f => f.label);
-    const occ     = data.forecast.map(f => f.occupancy);
-    const tt      = data.forecast.map(f => f.travel_time);
-    const bgColors = data.forecast.map(f => f.is_peak
-      ? 'rgba(240, 180, 41, 0.7)'
-      : 'rgba(0, 200, 255, 0.5)');
-
-    if (chartInstance) chartInstance.destroy();
-
-    const ctx = document.getElementById('demand-chart').getContext('2d');
-    chartInstance = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [
-          {
-            label: 'Predicted Passengers',
-            data: occ,
-            backgroundColor: bgColors,
-            borderColor: bgColors.map(c => c.replace('0.7', '1').replace('0.5', '1')),
-            borderWidth: 1,
-            yAxisID: 'y',
-          },
-          {
-            label: 'ETA (min)',
-            data: tt,
-            type: 'line',
-            borderColor: '#7c6ff7',
-            backgroundColor: 'rgba(124, 111, 247, 0.1)',
-            borderWidth: 2,
-            pointRadius: 3,
-            tension: 0.4,
-            yAxisID: 'y1',
-            fill: true,
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { labels: { color: '#7d8fa8', font: { family: 'Space Grotesk', size: 11 } } },
-          tooltip: { backgroundColor: '#1e2530', borderColor: '#2a3240', borderWidth: 1 },
-        },
-        scales: {
-          x: { ticks: { color: '#7d8fa8', font: { size: 10 } }, grid: { color: '#2a3240' } },
-          y: {
-            position: 'left',
-            ticks: { color: '#7d8fa8', font: { size: 10 } },
-            grid: { color: '#2a3240' },
-            title: { display: true, text: 'Passengers', color: '#7d8fa8', font: { size: 10 } },
-          },
-          y1: {
-            position: 'right',
-            ticks: { color: '#7c6ff7', font: { size: 10 } },
-            grid: { drawOnChartArea: false },
-            title: { display: true, text: 'ETA (min)', color: '#7c6ff7', font: { size: 10 } },
-          }
-        }
-      }
-    });
-  } catch (e) {
-    console.warn('Chart load failed:', e);
-  }
-}
-
-// ── Model metrics ─────────────────────────────────────────────────────────────
-
+// ── Metrics ───────────────────────────────────────────────────────────────────
 async function loadMetrics() {
   try {
-    const res  = await fetch('/api/metrics');
-    const m    = await res.json();
-
-    // Hero strip
-    $('hero-model-occ').textContent = m.mae_rf_occupancy ?? '—';
-    $('hero-model-tt').textContent  = m.mae_rf_travel_time ?? '—';
-
-    // Metrics grid
-    const grid = $('metrics-grid');
-    grid.innerHTML = '';
-
-    const cards = [
-      { val: m.mae_rf_occupancy,    label: 'RF Occupancy MAE',    sub: 'passengers (RF model)' },
-      { val: m.mae_base_occupancy,  label: 'Baseline Occ MAE',    sub: 'passengers (hist. avg)' },
-      { val: m.mae_rf_travel_time,  label: 'RF Travel Time MAE',  sub: 'minutes (RF model)' },
-      { val: m.mae_base_travel_time,label: 'Baseline ETA MAE',    sub: 'minutes (hist. avg)' },
-      { val: m.mae_rf_occ_peak,     label: 'Peak-hour Occ MAE',   sub: 'RF model, peak only' },
-      { val: m.mae_rf_occ_offpeak,  label: 'Off-peak Occ MAE',    sub: 'RF model, off-peak' },
-    ];
-
-    cards.forEach(c => {
-      const card = el('div', 'metric-card');
-      card.innerHTML = `
-        <span class="mc-val">${c.val ?? '—'}</span>
-        <span class="mc-label">${c.label}</span>
-        <span class="mc-sub">${c.sub}</span>`;
-      grid.appendChild(card);
-    });
-  } catch (e) {
-    console.warn('Metrics load failed:', e);
-  }
-}
-
-// ── DOM utils ─────────────────────────────────────────────────────────────────
-
-function el(tag, cls) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  return e;
-}
-
-function toggle(id, show) {
-  const e = $(id);
-  if (show) e.classList.remove('hidden');
-  else      e.classList.add('hidden');
+    const res = await fetch('/api/metrics');
+    const m   = await res.json();
+    const strip = $('accuracy-strip');
+    const diff  = (m.mae_base_occupancy - m.mae_rf_occupancy).toFixed(2);
+    strip.innerHTML = `RF model: <span class="acc-better">${m.mae_rf_occupancy} pax MAE</span> vs baseline ${m.mae_base_occupancy} pax — <span class="acc-better">${diff} pax improvement</span>`;
+  } catch (e) {}
 }
