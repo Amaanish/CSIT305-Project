@@ -12,7 +12,7 @@ import os
 np.random.seed(42)
 
 ROUTES = ["Campus → Mall", "Mall → Campus", "Campus → Metro", "Metro → Campus"]
-BUS_CAPACITY = 40
+BUS_CAPACITY = 27  # Optare Solo actual capacity
 N_RECORDS = 5000
 
 def peak_factor(hour):

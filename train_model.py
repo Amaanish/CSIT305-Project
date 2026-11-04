@@ -80,7 +80,7 @@ metrics = {
     "mae_rf_occ_peak":     round(mae_rf_occ_peak, 2),
     "mae_rf_occ_offpeak":  round(mae_rf_occ_off, 2),
     "routes":              ROUTES,
-    "bus_capacity":        40,
+    "bus_capacity":        27,
 }
 with open("models/metrics.json", "w") as f:
     json.dump(metrics, f, indent=2)

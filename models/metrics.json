@@ -1,15 +1,15 @@
 {
-  "mae_rf_occupancy": 4.87,
-  "mae_base_occupancy": 6.57,
+  "mae_rf_occupancy": 4.72,
+  "mae_base_occupancy": 5.35,
   "mae_rf_travel_time": 1.83,
   "mae_base_travel_time": 1.68,
-  "mae_rf_occ_peak": 4.23,
-  "mae_rf_occ_offpeak": 5.15,
+  "mae_rf_occ_peak": 4.2,
+  "mae_rf_occ_offpeak": 4.95,
   "routes": [
     "Mall \u2192 Campus",
     "Metro \u2192 Campus",
     "Campus \u2192 Mall",
     "Campus \u2192 Metro"
   ],
-  "bus_capacity": 40
+  "bus_capacity": 27
 }

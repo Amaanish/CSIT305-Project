@@ -40,7 +40,7 @@ except Exception as e:
     MODELS_LOADED = False
     METRICS = {}
 
-BUS_CAPACITY = 40
+BUS_CAPACITY = 27  # Optare Solo actual capacity
 ROUTES = ["Campus → Mall", "Mall → Campus", "Campus → Metro", "Metro → Campus"]
 
 ROUTE_STOPS = {
@@ -220,6 +220,14 @@ def simulate_gps_failure():
     pred["gps_warning"] = "GPS signal lost — arrival time estimate may be unreliable. Showing last-known prediction."
     pred["route"]       = route
     return jsonify(pred)
+
+
+@app.route("/api/dispatches_public")
+def dispatches_public():
+    """Public read-only endpoint — returns active/scheduled dispatches for consumer page."""
+    active = [{"route": d["route"], "buses": d["buses"], "status": d["status"]}
+              for d in DISPATCHES if d["status"] != "Cancelled"]
+    return jsonify(active)
 
 
 # ── Employee portal ───────────────────────────────────────────────────────────
