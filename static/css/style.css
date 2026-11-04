@@ -2,19 +2,19 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:          #0d1117;
-  --surface:     #161b22;
-  --surface-2:   #1e2530;
-  --border:      #2a3240;
-  --accent:      #00c8ff;
-  --accent-dim:  rgba(0, 200, 255, 0.12);
-  --accent-2:    #7c6ff7;
-  --success:     #2ddb6a;
-  --warning:     #f0b429;
-  --danger:      #f05252;
-  --moderate:    #60a5fa;
-  --text:        #e6edf3;
-  --text-dim:    #7d8fa8;
+--bg:          #efe8da;
+  --surface:     #faf6ee;
+  --surface-2:   #f3ecdf;
+  --border:      #ddd2bd;
+  --accent:      #e21f26;
+  --accent-dim:  rgba(226, 31, 38, 0.10);
+  --accent-2:    #8a1015;
+  --success:     #1e9e4a;
+  --warning:     #d98a00;
+  --danger:      #b00020;
+  --moderate:    #2b6cb0;
+  --text:        #1a1a1a;
+  --text-dim:    #6b6b73;
   --font-sans:   'Space Grotesk', system-ui, sans-serif;
   --font-mono:   'Space Mono', monospace;
   --radius:      10px;
