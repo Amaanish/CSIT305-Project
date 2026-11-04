@@ -4,98 +4,147 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ShuttleIQ</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/style.css" />
 </head>
 <body>
 
-<header class="topbar">
-  <div class="topbar-inner">
-    <div class="logo">🚌 ShuttleIQ</div>
-    <div class="live-pill"><span class="dot"></span>Live</div>
+<!-- HEADER -->
+<header class="site-header">
+  <div class="header-inner">
+    <div class="logo"><span class="logo-icon">⬡</span><span>ShuttleIQ</span></div>
+    <nav class="header-nav">
+      <div class="role-switch">
+        <span class="role-btn active">Passenger</span>
+        <a class="role-btn" href="/employee/login">Staff</a>
+      </div>
+      <div class="live-badge"><span class="pulse-dot"></span> Live</div>
+    </nav>
   </div>
 </header>
 
-<main class="app">
+<!-- HERO STRIP -->
+<section class="hero-strip">
+  <div class="hero-inner">
+    <div class="hero-stat"><span class="stat-number" id="hero-occ-pct">—</span><span class="stat-label">Occupancy %</span></div>
+    <div class="hero-divider"></div>
+    <div class="hero-stat"><span class="stat-number" id="hero-seats">—</span><span class="stat-label">Seats Free</span></div>
+    <div class="hero-divider"></div>
+    <div class="hero-stat"><span class="stat-number" id="hero-eta">—</span><span class="stat-label">ETA (min)</span></div>
+    <div class="hero-divider"></div>
+    <div class="hero-stat"><span class="stat-number" id="hero-mae">—</span><span class="stat-label">RF MAE (pax)</span></div>
+  </div>
+</section>
 
-  <!-- Route selector -->
-  <section class="card route-card">
-    <label class="field-label">Route</label>
-    <div class="route-tabs" id="route-tabs">
-      {% for r in routes %}
-      <button class="route-tab {% if loop.first %}active{% endif %}" data-route="{{ r }}">{{ r }}</button>
-      {% endfor %}
-    </div>
-  </section>
+<!-- MAIN -->
+<main class="main-grid">
 
-  <!-- Next buses -->
-  <section class="card">
-    <label class="field-label">Next departures</label>
-    <div class="departures" id="departures">
-      <div class="loading">Fetching…</div>
-    </div>
-  </section>
+  <!-- LEFT: passenger view -->
+  <section class="panel" style="display:flex;flex-direction:column;gap:1.2rem;">
 
-  <!-- Seat map -->
-  <section class="card seatmap-card">
-    <div class="seatmap-header">
-      <label class="field-label">Seat availability</label>
-      <span class="seatmap-route" id="seatmap-route"></span>
-    </div>
-    <div class="cv-pill">📷 CV density feed — simulated</div>
-    <div class="bus-wrap">
-      <div class="bus-body" id="bus-body">
-        <!-- rendered by JS -->
+    <!-- Route selector -->
+    <div>
+      <div class="panel-header" style="margin-bottom:0.6rem;">
+        <h2>Select Route</h2>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:0.4rem;" id="route-tabs">
+        {% for r in routes %}
+        <button class="role-btn {% if loop.first %}active{% endif %}" style="cursor:pointer;border:1px solid var(--border);background:var(--surface-2);border-radius:999px;" data-route="{{ r }}">{{ r }}</button>
+        {% endfor %}
       </div>
     </div>
-    <div class="seat-legend">
-      <span class="leg-item"><span class="leg-dot free"></span>Free</span>
-      <span class="leg-item"><span class="leg-dot taken"></span>Taken</span>
-      <span class="leg-item"><span class="leg-dot standing"></span>Standing</span>
-    </div>
-  </section>
 
-  <!-- Best bus recommendation -->
-  <section class="card rec-card" id="rec-card">
-    <div class="rec-icon">✅</div>
-    <div class="rec-body">
-      <div class="rec-title" id="rec-title">Best option loading…</div>
-      <div class="rec-sub" id="rec-sub"></div>
-    </div>
-  </section>
-
-  <!-- Time picker -->
-  <section class="card slim-card">
-    <div class="slim-row">
-      <div class="field-group">
-        <label class="field-label">Hour</label>
-        <select id="sel-hour">
-          {% for h in range(6, 23) %}
-          <option value="{{ h }}" {% if h == 8 %}selected{% endif %}>{{ '%02d:00' % h }}</option>
-          {% endfor %}
-        </select>
+    <!-- Time picker -->
+    <div>
+      <div class="panel-header" style="margin-bottom:0.6rem;"><h2>When?</h2></div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Hour</label>
+          <select id="sel-hour">
+            {% for h in range(6, 23) %}
+            <option value="{{ h }}" {% if h == 8 %}selected{% endif %}>{{ '%02d:00' % h }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Day</label>
+          <select id="sel-day">
+            <option value="0">Monday</option><option value="1">Tuesday</option>
+            <option value="2">Wednesday</option><option value="3">Thursday</option>
+            <option value="4">Friday</option><option value="5">Saturday</option>
+            <option value="6">Sunday</option>
+          </select>
+        </div>
       </div>
-      <div class="field-group">
-        <label class="field-label">Day</label>
-        <select id="sel-day">
-          <option value="0">Monday</option>
-          <option value="1">Tuesday</option>
-          <option value="2">Wednesday</option>
-          <option value="3">Thursday</option>
-          <option value="4">Friday</option>
-          <option value="5">Saturday</option>
-          <option value="6">Sunday</option>
-        </select>
-      </div>
-      <button class="btn-go" id="btn-go">Update</button>
+      <button class="btn-predict" id="btn-go">Get Predictions</button>
     </div>
+
+    <!-- Next departures -->
+    <div>
+      <div class="panel-header" style="margin-bottom:0.6rem;"><h2>Next Departures</h2><p class="panel-sub">Tap a row to see its seat map</p></div>
+      <div id="departures" style="display:flex;flex-direction:column;gap:0.5rem;">
+        <div class="loading-msg">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Recommendation -->
+    <div class="result-card" id="rec-card" style="display:flex;align-items:center;gap:0.8rem;">
+      <span style="font-size:1.5rem;" id="rec-icon">✅</span>
+      <div>
+        <div style="font-size:0.9rem;font-weight:600;" id="rec-title">Loading…</div>
+        <div class="panel-sub" id="rec-sub"></div>
+      </div>
+    </div>
+
   </section>
 
-  <!-- Model accuracy strip (small, unobtrusive) -->
-  <section class="card slim-card">
-    <label class="field-label">Model accuracy (RF vs historical baseline)</label>
-    <div class="accuracy-strip" id="accuracy-strip">—</div>
+  <!-- RIGHT: seat map + accuracy -->
+  <section class="panel" style="display:flex;flex-direction:column;gap:1.2rem;">
+
+    <!-- Seat map -->
+    <div>
+      <div class="panel-header" style="margin-bottom:0.4rem;">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <h2>Seat Availability</h2>
+          <span class="panel-sub" id="seatmap-route"></span>
+        </div>
+      </div>
+      <div style="display:inline-block;background:rgba(0,200,255,0.06);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.65rem;font-size:0.72rem;color:var(--text-dim);margin-bottom:0.9rem;">
+        📷 CV density feed — simulated
+      </div>
+
+      <!-- Bus shell -->
+      <div style="display:flex;justify-content:center;">
+        <div id="bus-body" style="background:#0d1117;border:2px solid #3a3f52;border-radius:18px 18px 10px 10px;padding:1rem 0.8rem 0.8rem;width:100%;max-width:420px;">
+          <!-- filled by JS -->
+        </div>
+      </div>
+
+      <!-- Legend -->
+      <div style="display:flex;gap:1.2rem;margin-top:0.9rem;justify-content:center;">
+        <span style="display:flex;align-items:center;gap:0.4rem;font-size:0.75rem;color:var(--text-dim);">
+          <span style="width:12px;height:12px;border-radius:3px;background:rgba(45,219,106,0.5);display:inline-block;"></span>Free
+        </span>
+        <span style="display:flex;align-items:center;gap:0.4rem;font-size:0.75rem;color:var(--text-dim);">
+          <span style="width:12px;height:12px;border-radius:3px;background:rgba(240,82,82,0.5);display:inline-block;"></span>Taken
+        </span>
+        <span style="display:flex;align-items:center;gap:0.4rem;font-size:0.75rem;color:var(--text-dim);">
+          <span style="width:12px;height:12px;border-radius:3px;background:rgba(240,180,41,0.5);display:inline-block;"></span>Standing
+        </span>
+      </div>
+    </div>
+
+    <!-- Model accuracy -->
+    <div>
+      <div class="panel-header" style="margin-bottom:0.6rem;">
+        <h2>Model Accuracy</h2>
+        <p class="panel-sub">Random Forest vs historical baseline</p>
+      </div>
+      <div class="metrics-grid" id="metrics-grid">
+        <div class="loading-msg">Loading…</div>
+      </div>
+    </div>
+
   </section>
 
 </main>
