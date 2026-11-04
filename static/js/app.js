@@ -125,25 +125,30 @@ async function loadDepartures() {
 }
 
 // ── Optare Solo seat map ───────────────────────────────────────────────────────
-// Layout based on actual floor plan:
-// Front: wheelchair bay (left) + 2 seats (right, forward-facing) + door
-// Row 1: 2 seats left only (over wheel arch) + 3 seats right
-// Rows 2-7: 2 seats left + 2 seats right (standard 2+2)
-// Rear row: 5 seats across back bench
+// Layout based on actual Optare Solo SR floor plan:
 //
-// Total: 2 + 3 + (6×4) + 5 = 34 — trim to 27 for Solo SR
+//  [DRIVER] [DOOR]  ← front
+//  [STAND ZONE] — aisle area near door, up to ~6 standing passengers
+//  Row A: left×1  |aisle|  right×2   (front seats, wheel arch left)
+//  Row B: left×2  |aisle|  right×2
+//  Row C: left×2  |aisle|  right×2
+//  Row D: left×2  |aisle|  right×2
+//  Row E: left×2  |aisle|  right×2
+//  [REAR BENCH: 5 seats across]
+//
+//  Total seats: 1 + 2 + (4×4) + 5 = 24 seated + 3 standing = 27 total capacity
 
-// Seat layout definition: each entry is a row
-// 'L' = left seats count, 'R' = right seats count, 'type' = special
+const SEATED_CAPACITY  = 24;
+const STANDING_MAX     = 3;   // standing zone near door
 const SOLO_LAYOUT = [
-  { type: 'driver' },                        // driver + wheelchair
-  { L: 0, R: 2, note: 'door-side' },        // front right only (door left)
-  { L: 2, R: 2 },
-  { L: 2, R: 2 },
-  { L: 2, R: 2 },
-  { L: 2, R: 2 },
-  { L: 2, R: 2 },
-  { L: 0, R: 0, type: 'rear-bench', seats: 5 }, // rear bench
+  { type: 'driver' },
+  { type: 'standing' },                          // standing zone near door
+  { L: 1, R: 2 },                                // row A: 1 left (wheel arch), 2 right
+  { L: 2, R: 2 },                                // row B
+  { L: 2, R: 2 },                                // row C
+  { L: 2, R: 2 },                                // row D
+  { L: 2, R: 2 },                                // row E
+  { type: 'rear-bench', seats: 5 },              // rear bench
 ];
 
 function renderSeatMap(data, route) {
@@ -151,11 +156,11 @@ function renderSeatMap(data, route) {
   $('seatmap-route').textContent = route;
   busBody.innerHTML = '';
 
-  const seated   = Math.min(Math.round(data.occupancy), BUS_CAPACITY);
-  const standing = Math.max(0, Math.round(data.occupancy) - BUS_CAPACITY);
+  const totalOcc = Math.round(data.occupancy);
+  const seated   = Math.min(totalOcc, SEATED_CAPACITY);
+  const standing = Math.min(Math.max(0, totalOcc - SEATED_CAPACITY), STANDING_MAX);
 
   let seatIndex = 0;
-
   const isTaken = () => { const t = seatIndex < seated; seatIndex++; return t; };
 
   const seatEl = (taken) => {
@@ -166,10 +171,15 @@ function renderSeatMap(data, route) {
     return s;
   };
 
-  const gap = () => {
-    const g = document.createElement('div');
-    g.style.cssText = 'flex:1;min-width:8px;';
-    return g;
+  const standingEl = (occupied) => {
+    const s = document.createElement('div');
+    s.title = occupied ? 'Standing passenger' : 'Standing space free';
+    s.style.cssText = `width:22px;height:22px;border-radius:3px;border:1px dashed;flex-shrink:0;
+      display:flex;align-items:center;justify-content:center;font-size:0.55rem;
+      background:${occupied ? 'rgba(240,180,41,0.25)' : 'rgba(255,255,255,0.03)'};
+      border-color:${occupied ? 'rgba(240,180,41,0.6)' : 'rgba(255,255,255,0.1)'};`;
+    s.textContent = occupied ? '🧍' : '';
+    return s;
   };
 
   const aisle = () => {
@@ -178,61 +188,62 @@ function renderSeatMap(data, route) {
     return a;
   };
 
-  // Bus outer shell styling
   busBody.style.cssText = 'background:#0d1117;border:2px solid #3a3f52;border-radius:20px 20px 12px 12px;padding:0.8rem;display:flex;flex-direction:column;gap:6px;position:relative;';
 
-  // ── Driver / wheelchair row ──
-  const driverRow = document.createElement('div');
-  driverRow.style.cssText = 'display:flex;align-items:center;gap:6px;padding-bottom:6px;border-bottom:1px dashed var(--border);margin-bottom:2px;';
-  const wheelEl = document.createElement('div');
-  wheelEl.style.cssText = 'width:36px;height:28px;border-radius:5px;border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-size:0.65rem;color:var(--text-dim);flex-shrink:0;';
-  wheelEl.textContent = '♿';
-  const driverLabel = document.createElement('div');
-  driverLabel.style.cssText = 'font-size:0.65rem;color:var(--text-dim);flex:1;';
-  driverLabel.textContent = 'Driver';
-  const doorLabel = document.createElement('div');
-  doorLabel.style.cssText = 'font-size:0.6rem;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:0.1rem 0.4rem;opacity:0.7;';
-  doorLabel.textContent = 'DOOR';
-  driverRow.append(wheelEl, driverLabel, doorLabel);
-  busBody.appendChild(driverRow);
-
-  // ── Seat rows ──
   SOLO_LAYOUT.forEach(rowDef => {
-    if (rowDef.type === 'driver') return;
-
     const rowEl = document.createElement('div');
     rowEl.style.cssText = 'display:flex;align-items:center;gap:5px;';
 
-    if (rowDef.type === 'rear-bench') {
-      // 5 seats across back
+    if (rowDef.type === 'driver') {
+      rowEl.style.cssText += 'padding-bottom:6px;border-bottom:1px dashed var(--border);margin-bottom:2px;';
+      const wheelEl = document.createElement('div');
+      wheelEl.style.cssText = 'width:36px;height:28px;border-radius:5px;border:1px dashed var(--border);display:flex;align-items:center;justify-content:center;font-size:0.65rem;color:var(--text-dim);flex-shrink:0;';
+      wheelEl.textContent = '♿';
+      const driverLabel = document.createElement('div');
+      driverLabel.style.cssText = 'font-size:0.65rem;color:var(--text-dim);flex:1;';
+      driverLabel.textContent = 'Driver';
+      const doorLabel = document.createElement('div');
+      doorLabel.style.cssText = 'font-size:0.6rem;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:0.1rem 0.4rem;opacity:0.7;';
+      doorLabel.textContent = 'DOOR';
+      rowEl.append(wheelEl, driverLabel, doorLabel);
+
+    } else if (rowDef.type === 'standing') {
+      // Standing zone — always render all STANDING_MAX boxes, fill based on standing count
+      rowEl.style.cssText += 'padding:4px 0 6px;border-bottom:1px dashed var(--border);margin-bottom:2px;';
+      const label = document.createElement('div');
+      label.style.cssText = 'font-size:0.6rem;color:var(--text-dim);margin-right:6px;white-space:nowrap;width:50px;flex-shrink:0;';
+      label.textContent = 'Standing';
+      rowEl.appendChild(label);
+      for (let i = 0; i < STANDING_MAX; i++) {
+        rowEl.appendChild(standingEl(i < standing));
+        if (i < STANDING_MAX - 1) {
+          const sp = document.createElement('div'); sp.style.width = '4px'; rowEl.appendChild(sp);
+        }
+      }
+
+    } else if (rowDef.type === 'rear-bench') {
       rowEl.style.justifyContent = 'center';
       rowEl.style.marginTop = '4px';
       rowEl.style.paddingTop = '4px';
       rowEl.style.borderTop = '1px dashed var(--border)';
       for (let i = 0; i < rowDef.seats; i++) {
         rowEl.appendChild(seatEl(isTaken()));
-        if (i < rowDef.seats - 1) {
-          const sp = document.createElement('div');
-          sp.style.width = '5px';
-          rowEl.appendChild(sp);
-        }
+        if (i < rowDef.seats - 1) { const sp = document.createElement('div'); sp.style.width = '5px'; rowEl.appendChild(sp); }
       }
+
     } else {
-      // Left seats
+      // Normal seat row: left | aisle | right
       const leftWrap = document.createElement('div');
       leftWrap.style.cssText = 'display:flex;gap:4px;width:60px;justify-content:flex-end;';
       for (let i = 0; i < rowDef.L; i++) leftWrap.appendChild(seatEl(isTaken()));
-      if (rowDef.L === 0) {
-        // empty placeholder (door/arch side)
+      // Pad empty slots (wheel arch)
+      for (let i = rowDef.L; i < 2; i++) {
         const ph = document.createElement('div');
-        ph.style.cssText = 'width:28px;height:28px;border-radius:5px;border:1px dashed rgba(255,255,255,0.08);';
+        ph.style.cssText = 'width:28px;height:28px;border-radius:5px;border:1px dashed rgba(255,255,255,0.06);flex-shrink:0;';
         leftWrap.appendChild(ph);
       }
-
       rowEl.appendChild(leftWrap);
       rowEl.appendChild(aisle());
-
-      // Right seats
       const rightWrap = document.createElement('div');
       rightWrap.style.cssText = 'display:flex;gap:4px;';
       for (let i = 0; i < rowDef.R; i++) rightWrap.appendChild(seatEl(isTaken()));
@@ -242,18 +253,11 @@ function renderSeatMap(data, route) {
     busBody.appendChild(rowEl);
   });
 
-  // Standing
-  if (standing > 0) {
-    const s = document.createElement('div');
-    s.style.cssText = 'margin-top:0.5rem;font-size:0.7rem;color:var(--warning);text-align:center;';
-    s.textContent = `+${standing} standing`;
-    busBody.appendChild(s);
-  }
-
   // Summary
+  const freeSeats = SEATED_CAPACITY - seated;
   const summary = document.createElement('div');
   summary.style.cssText = 'margin-top:0.4rem;font-size:0.72rem;color:var(--text-dim);text-align:center;border-top:1px dashed var(--border);padding-top:0.4rem;';
-  summary.textContent = `${seated} seated · ${BUS_CAPACITY - seated} free · ${data.occupancy_pct}% full`;
+  summary.textContent = `${seated} seated · ${freeSeats} seats free · ${standing}/${STANDING_MAX} standing · ${data.occupancy_pct}% full`;
   busBody.appendChild(summary);
 }
 
