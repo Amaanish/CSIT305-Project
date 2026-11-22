@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Employee sign in — ShuttleIQ</title>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div class="login-wrap">
+    <form class="panel login-card" method="post">
+      <div class="logo"><span class="logo-icon">⬡</span><span>ShuttleIQ</span></div>
+      <h2>Employee sign in</h2>
+      <p class="panel-sub">Enter your staff PIN to open the dispatch console.</p>
+      {% if error %}<div class="gps-warning" style="margin-top:1rem">{{ error }}</div>{% endif %}
+      <div class="form-group" style="margin-top:1rem">
+        <label for="pin">Staff PIN</label>
+        <input type="password" id="pin" name="pin" class="text-input" autofocus required />
+      </div>
+      <button class="btn-predict" type="submit">Sign in</button>
+      <a class="back-link" href="/">Back to customer view</a>
+    </form>
+  </div>
+</body>
+</html>
