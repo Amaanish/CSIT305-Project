@@ -1,33 +1,61 @@
 /* app.js — ShuttleIQ passenger view */
 const $ = id => document.getElementById(id);
 
-const ROUTES = ["Campus → Mall", "Mall → Campus", "Campus → Metro", "Metro → Campus"];
-const BUS_CAPACITY = 27; // Optare Solo actual capacity
+// Routes and capacity loaded dynamically from API
+let ROUTES = [];
+let BUS_CAPACITY = 60;
+const SEATED_CAPACITY = 24;
+const STANDING_MAX = 3;
 
-let activeRoute = ROUTES[0];
+let activeRoute = '';
 let currentHour = Math.min(22, Math.max(6, new Date().getHours()));
 let currentDay  = [6,0,1,2,3,4,5][new Date().getDay()];
 
-window.addEventListener('DOMContentLoaded', () => {
+const SOLO_LAYOUT = [
+  { type: 'driver' },
+  { type: 'standing' },
+  { L: 1, R: 2 },
+  { L: 2, R: 2 },
+  { L: 2, R: 2 },
+  { L: 2, R: 2 },
+  { L: 2, R: 2 },
+  { type: 'rear-bench', seats: 5 },
+];
+
+window.addEventListener('DOMContentLoaded', async () => {
   $('sel-hour').value = currentHour;
   $('sel-day').value  = currentDay;
 
-  document.querySelectorAll('#route-tabs button').forEach(btn => {
+  // Load metrics first to get real routes and capacity
+  await loadMetrics();
+
+  // Build route tabs dynamically
+  const tabsContainer = $('route-tabs');
+  tabsContainer.innerHTML = '';
+  ROUTES.forEach((r, idx) => {
+    const btn = document.createElement('button');
+    btn.className = 'role-btn';
+    btn.style.cssText = 'cursor:pointer;border:1px solid var(--border);background:var(--surface-2);border-radius:999px;';
+    btn.dataset.route = r;
+    btn.textContent = r;
+    if (idx === 0) {
+      btn.style.background = 'var(--accent)';
+      btn.style.color = '#000';
+      activeRoute = r;
+    }
     btn.addEventListener('click', () => {
-      document.querySelectorAll('#route-tabs button').forEach(b => {
+      tabsContainer.querySelectorAll('button').forEach(b => {
         b.classList.remove('active');
         b.style.background = 'var(--surface-2)';
         b.style.color = '';
       });
-      btn.classList.add('active');
       btn.style.background = 'var(--accent)';
       btn.style.color = '#000';
-      activeRoute = btn.dataset.route;
+      activeRoute = r;
       refresh();
     });
+    tabsContainer.appendChild(btn);
   });
-  const firstTab = document.querySelector('#route-tabs button');
-  if (firstTab) { firstTab.style.background = 'var(--accent)'; firstTab.style.color = '#000'; }
 
   $('btn-go').addEventListener('click', () => {
     currentHour = parseInt($('sel-hour').value);
@@ -35,19 +63,17 @@ window.addEventListener('DOMContentLoaded', () => {
     refresh();
   });
 
-  loadMetrics();
   refresh();
-  setInterval(refresh, 30000); // auto-refresh every 30s to pick up staff dispatches
+  setInterval(refresh, 30000);
 });
 
 function refresh() { loadDepartures(); }
 
-// ── Departures (factors in staff dispatches) ──────────────────────────────────
 async function loadDepartures() {
+  if (!activeRoute) return;
   const container = $('departures');
   container.innerHTML = '<div class="loading-msg">Fetching…</div>';
 
-  // Fetch predictions + any active staff dispatches for this route
   const offsets = [0, 15, 30];
   const [results, dispatches] = await Promise.all([
     Promise.all(offsets.map(async offset => {
@@ -59,18 +85,21 @@ async function loadDepartures() {
     fetch('/api/dispatches_public').then(r => r.json()).catch(() => [])
   ]);
 
-  // Count extra buses dispatched for this route
+  const validResults = results.filter(r => !r.data.error);
+  if (!validResults.length) {
+    container.innerHTML = '<div class="loading-msg">No predictions available.</div>';
+    return;
+  }
+
   const extraBuses = dispatches.filter(d =>
     d.route === activeRoute && d.status !== 'Cancelled'
   ).reduce((sum, d) => sum + d.buses, 0);
 
   container.innerHTML = '';
-  const bestIdx = results.reduce((bi, r, i) => r.data.occupancy < results[bi].data.occupancy ? i : bi, 0);
+  const bestIdx = validResults.reduce((bi, r, i) =>
+    r.data.occupancy < validResults[bi].data.occupancy ? i : bi, 0);
 
-  results.forEach(({ offset, data }, i) => {
-    if (data.error) return;
-
-    // If extra buses dispatched, spread passengers — reduce effective occupancy
+  validResults.forEach(({ offset, data }, i) => {
     let adjOccupancy = data.occupancy;
     let adjOccPct    = data.occupancy_pct;
     let extraNote    = '';
@@ -82,14 +111,14 @@ async function loadDepartures() {
 
     const depTime = new Date();
     depTime.setHours(currentHour, offset, 0, 0);
-    const timeStr = depTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const isBest  = i === bestIdx;
-    const isFull  = adjOccPct >= 95;
+    const timeStr    = depTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const isBest     = i === bestIdx;
+    const isFull     = adjOccPct >= 95;
     const seatChance = isFull ? 0 : Math.round(100 - adjOccPct);
     const chanceColor = seatChance >= 60 ? 'var(--success)' : seatChance >= 30 ? 'var(--warning)' : 'var(--danger)';
     const chanceText  = isFull ? '🚫 Full' : `${seatChance}% chance of a seat`;
-    let badgeClass = isBest && !isFull ? 'success' : isFull ? 'danger' : adjOccPct >= 70 ? 'warning' : 'moderate';
-    let badgeText  = isBest && !isFull ? 'Best option' : isFull ? 'Full' : (adjOccPct >= 70 ? 'Busy' : adjOccPct >= 40 ? 'Moderate' : 'Available');
+    const badgeClass  = isBest && !isFull ? 'success' : isFull ? 'danger' : adjOccPct >= 70 ? 'warning' : 'moderate';
+    const badgeText   = isBest && !isFull ? 'Best option' : isFull ? 'Full' : (adjOccPct >= 70 ? 'Busy' : adjOccPct >= 40 ? 'Moderate' : 'Available');
 
     const row = document.createElement('div');
     row.style.cssText = `display:flex;align-items:center;justify-content:space-between;
@@ -100,7 +129,7 @@ async function loadDepartures() {
     const left = document.createElement('div');
     left.innerHTML = `
       <div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;">${timeStr}</div>
-      <div style="font-size:0.75rem;color:var(--text-dim);">~${data.travel_time_min} min journey</div>
+      <div style="font-size:0.75rem;color:var(--text-dim);">~${data.travel_time_min} min delay</div>
       ${extraNote ? `<div style="font-size:0.7rem;color:var(--accent);margin-top:0.2rem;">🚌 ${extraNote}</div>` : ''}`;
 
     const right = document.createElement('div');
@@ -120,43 +149,16 @@ async function loadDepartures() {
     }
   });
 
-  renderSeatMap({ ...results[bestIdx].data }, activeRoute);
-  renderRecommendation(results, bestIdx, extraBuses);
+  renderSeatMap({ ...validResults[bestIdx].data }, activeRoute);
+  renderRecommendation(validResults, bestIdx, extraBuses);
 }
-
-// ── Optare Solo seat map ───────────────────────────────────────────────────────
-// Layout based on actual Optare Solo SR floor plan:
-//
-//  [DRIVER] [DOOR]  ← front
-//  [STAND ZONE] — aisle area near door, up to ~6 standing passengers
-//  Row A: left×1  |aisle|  right×2   (front seats, wheel arch left)
-//  Row B: left×2  |aisle|  right×2
-//  Row C: left×2  |aisle|  right×2
-//  Row D: left×2  |aisle|  right×2
-//  Row E: left×2  |aisle|  right×2
-//  [REAR BENCH: 5 seats across]
-//
-//  Total seats: 1 + 2 + (4×4) + 5 = 24 seated + 3 standing = 27 total capacity
-
-const SEATED_CAPACITY  = 24;
-const STANDING_MAX     = 3;   // standing zone near door
-const SOLO_LAYOUT = [
-  { type: 'driver' },
-  { type: 'standing' },                          // standing zone near door
-  { L: 1, R: 2 },                                // row A: 1 left (wheel arch), 2 right
-  { L: 2, R: 2 },                                // row B
-  { L: 2, R: 2 },                                // row C
-  { L: 2, R: 2 },                                // row D
-  { L: 2, R: 2 },                                // row E
-  { type: 'rear-bench', seats: 5 },              // rear bench
-];
 
 function renderSeatMap(data, route) {
   const busBody = $('bus-body');
   $('seatmap-route').textContent = route;
   busBody.innerHTML = '';
 
-  const totalOcc = Math.round(data.occupancy);
+  const totalOcc = Math.round(data.occupancy || 0);
   const seated   = Math.min(totalOcc, SEATED_CAPACITY);
   const standing = Math.min(Math.max(0, totalOcc - SEATED_CAPACITY), STANDING_MAX);
 
@@ -208,7 +210,6 @@ function renderSeatMap(data, route) {
       rowEl.append(wheelEl, driverLabel, doorLabel);
 
     } else if (rowDef.type === 'standing') {
-      // Standing zone — always render all STANDING_MAX boxes, fill based on standing count
       rowEl.style.cssText += 'padding:4px 0 6px;border-bottom:1px dashed var(--border);margin-bottom:2px;';
       const label = document.createElement('div');
       label.style.cssText = 'font-size:0.6rem;color:var(--text-dim);margin-right:6px;white-space:nowrap;width:50px;flex-shrink:0;';
@@ -232,11 +233,9 @@ function renderSeatMap(data, route) {
       }
 
     } else {
-      // Normal seat row: left | aisle | right
       const leftWrap = document.createElement('div');
       leftWrap.style.cssText = 'display:flex;gap:4px;width:60px;justify-content:flex-end;';
       for (let i = 0; i < rowDef.L; i++) leftWrap.appendChild(seatEl(isTaken()));
-      // Pad empty slots (wheel arch)
       for (let i = rowDef.L; i < 2; i++) {
         const ph = document.createElement('div');
         ph.style.cssText = 'width:28px;height:28px;border-radius:5px;border:1px dashed rgba(255,255,255,0.06);flex-shrink:0;';
@@ -253,15 +252,14 @@ function renderSeatMap(data, route) {
     busBody.appendChild(rowEl);
   });
 
-  // Summary
   const freeSeats = SEATED_CAPACITY - seated;
+  const occPct = data.occupancy_pct ?? 0;
   const summary = document.createElement('div');
   summary.style.cssText = 'margin-top:0.4rem;font-size:0.72rem;color:var(--text-dim);text-align:center;border-top:1px dashed var(--border);padding-top:0.4rem;';
-  summary.textContent = `${seated} seated · ${freeSeats} seats free · ${standing}/${STANDING_MAX} standing · ${data.occupancy_pct}% full`;
+  summary.textContent = `${seated} seated · ${freeSeats} seats free · ${standing}/${STANDING_MAX} standing · ${occPct}% full`;
   busBody.appendChild(summary);
 }
 
-// ── Recommendation ────────────────────────────────────────────────────────────
 function renderRecommendation(results, bestIdx, extraBuses) {
   const best   = results[bestIdx].data;
   const offset = results[bestIdx].offset;
@@ -277,15 +275,19 @@ function renderRecommendation(results, bestIdx, extraBuses) {
   } else {
     $('rec-icon').textContent  = '✅';
     $('rec-title').textContent = `Take the ${timeStr} bus`;
-    $('rec-sub').textContent   = `~${BUS_CAPACITY - adjOcc} seats free · ${best.travel_time_min} min journey · ${best.crowd_label}${extraBuses > 0 ? ` · +${extraBuses} extra bus dispatched` : ''}`;
+    $('rec-sub').textContent   = `~${BUS_CAPACITY - adjOcc} seats free · ${best.travel_time_min} min delay · ${best.crowd_label}${extraBuses > 0 ? ` · +${extraBuses} extra bus dispatched` : ''}`;
   }
 }
 
-// ── Metrics ───────────────────────────────────────────────────────────────────
 async function loadMetrics() {
   try {
     const res = await fetch('/api/metrics');
     const m   = await res.json();
+
+    // Set global routes and capacity from real data
+    ROUTES = m.routes || [];
+    BUS_CAPACITY = m.bus_capacity || 60;
+
     $('hero-mae').textContent = m.mae_rf_occupancy ?? '—';
     const grid = $('metrics-grid');
     grid.innerHTML = '';
@@ -302,5 +304,5 @@ async function loadMetrics() {
       card.innerHTML = `<span class="mc-val">${c.val ?? '—'}</span><span class="mc-label">${c.label}</span><span class="mc-sub">${c.sub}</span>`;
       grid.appendChild(card);
     });
-  } catch(e) {}
+  } catch(e) { console.error('Failed to load metrics', e); }
 }
