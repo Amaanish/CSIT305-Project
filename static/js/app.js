@@ -4,7 +4,7 @@ const $ = id => document.getElementById(id);
 // Routes and capacity loaded dynamically from API
 let ROUTES = [];
 let BUS_CAPACITY = 60;
-const SEATED_CAPACITY = 24;
+const SEATED_CAPACITY = 57;
 const STANDING_MAX = 3;
 
 let activeRoute = '';
