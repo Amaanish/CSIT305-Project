@@ -61,7 +61,7 @@ def get_prediction(hour, day_of_week, is_weekend, route_name):
         return None
 
     route_enc = encode_route(route_name)
-    X = np.array([[hour, day_of_week, is_weekend, route_enc]])
+    X = pd.DataFrame([[hour, day_of_week, is_weekend, route_enc]], columns=["hour", "day_of_week", "is_weekend", "route_enc"])
 
     occ_pred = float(rf_occ.predict(X)[0])
     tt_pred  = float(rf_tt.predict(X)[0])
