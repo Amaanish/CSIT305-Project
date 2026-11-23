@@ -262,23 +262,33 @@ def employee_logout():
 def employee_dashboard():
     return render_template("employee.html", routes=ROUTES, route_stops=ROUTE_STOPS)
 
+from functools import lru_cache
+import time
+
+_heatmap_cache = {"data": None, "ts": 0}
 
 @app.route("/api/employee/overview")
 @employee_required
 def employee_overview():
-    """Heatmap of predicted load (all routes x hours) + dispatch recommendations."""
     if not MODELS_LOADED:
         return jsonify({"error": "Models not loaded"}), 503
+    
     now = datetime.now()
     day, wk = now.weekday(), int(now.weekday() >= 5)
     cur = min(22, max(6, now.hour))
 
-    heat = {r: [get_prediction(h, day, wk, r)["occupancy_pct"] for h in range(6, 23)] for r in ROUTES}
+    # Cache heatmap for 5 minutes
+    global _heatmap_cache
+    if time.time() - _heatmap_cache["ts"] > 300 or _heatmap_cache["data"] is None:
+        heat = {r: [get_prediction(h, day, wk, r)["occupancy_pct"] for h in range(6, 23)] for r in ROUTES}
+        _heatmap_cache = {"data": heat, "ts": time.time()}
+    else:
+        heat = _heatmap_cache["data"]
 
     active = [d for d in DISPATCHES if d["status"] != "Cancelled"]
     recs = []
     for r in ROUTES:
-        for h in range(cur, min(23, cur + 4)):      # now + next 3 hours
+        for h in range(cur, min(23, cur + 4)):
             p = get_prediction(h, day, wk, r)
             if p["occupancy_pct"] >= 80:
                 covered = sum(d["buses"] for d in active if d["route"] == r)
