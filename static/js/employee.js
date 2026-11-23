@@ -6,7 +6,7 @@ const el = (tag, cls, text) => {
   if (text !== undefined) e.textContent = text;
   return e;
 };
-const pctColor = p => p >= 90 ? '#f05252' : p >= 70 ? '#f0b429' : p >= 40 ? '#60a5fa' : '#2ddb6a';
+const pctColor = p => p >= 30 ? '#f05252' : p >= 20 ? '#f0b429' : p >= 10 ? '#60a5fa' : '#2ddb6a';
 const hh = h => `${String(h).padStart(2, '0')}:00`;
 
 function fillStops() {
